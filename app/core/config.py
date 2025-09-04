@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     # API Settings
     PROJECT_NAME: str = "NEX Backend"
     VERSION: str = "1.0.0"
-    API_V1_STR: str = "/api"
+    API_V1_STR: str = "/api/v1"
     ROOT_PATH: str = ""  # For proxy prefixes
 
     # CORS Settings

@@ -587,6 +587,319 @@ class InfectionDetectionService:
             "unique_infections": sorted(list(unique_infections)),
         }
 
+    def generate_spread_visualization(
+        self, infection_type: str | None = None
+    ) -> dict[str, Any]:
+        """Generate data for spread visualization by infection type."""
+        if self.df_micro is None or not self.contacts:
+            # Ensure data is loaded and analyzed
+            self.load_and_optimize_data()
+            self.create_spatial_temporal_index()
+            self.contact_detection()
+            self.get_contact_groups()
+
+        if infection_type:
+            return self._generate_single_infection_spread(infection_type)
+        else:
+            return self._generate_all_infections_spread()
+
+    def _generate_single_infection_spread(self, infection_type: str) -> dict[str, Any]:
+        """Generate spread visualization data for a specific infection."""
+        # Filter contacts for this infection
+        infection_contacts = [
+            c for c in self.contacts if c["organism"] == infection_type
+        ]
+
+        if not infection_contacts:
+            return {
+                "infection_type": infection_type,
+                "timeline_events": [],
+                "spread_events": [],
+                "network_nodes": [],
+                "network_edges": [],
+                "date_range": {"earliest": None, "latest": None},
+                "stats": {
+                    "total_patients": 0,
+                    "total_contacts": 0,
+                    "total_spread_events": 0,
+                },
+            }
+
+        # Get patients with this infection
+        infection_patients = set()
+        for contact in infection_contacts:
+            infection_patients.add(contact["patient1"])
+            infection_patients.add(contact["patient2"])
+
+        # Generate timeline events
+        timeline_events = []
+        all_dates = []
+
+        # Add positive test events
+        positive_tests = self.df_positive[
+            (self.df_positive["infection"] == infection_type)
+            & (self.df_positive["patient_id"].isin(infection_patients))
+        ]
+
+        for _, test in positive_tests.iterrows():
+            date_str = test["collection_date"].strftime("%Y-%m-%d")
+            all_dates.append(test["collection_date"])
+
+            timeline_events.append(
+                {
+                    "date": date_str,
+                    "event_type": "positive_test",
+                    "patient_id": test["patient_id"],
+                    "infection": infection_type,
+                    "location": None,
+                    "related_patient": None,
+                    "details": {"test_result": "positive"},
+                }
+            )
+
+        # Add contact events
+        for contact in infection_contacts:
+            date_str = contact["contact_date"].strftime("%Y-%m-%d")
+            # Convert to datetime if it's a date object
+            if hasattr(contact["contact_date"], "date"):
+                all_dates.append(contact["contact_date"])
+            else:
+                all_dates.append(
+                    datetime.combine(contact["contact_date"], datetime.min.time())
+                )
+
+            timeline_events.append(
+                {
+                    "date": date_str,
+                    "event_type": "contact",
+                    "patient_id": contact["patient1"],
+                    "infection": None,
+                    "location": contact["location"],
+                    "related_patient": contact["patient2"],
+                    "details": {
+                        "days_from_test1": contact["days_from_test1"],
+                        "days_from_test2": contact["days_from_test2"],
+                    },
+                }
+            )
+
+        # Generate spread events (potential transmissions)
+        spread_events = []
+        for i, contact in enumerate(infection_contacts):
+            # Calculate confidence based on temporal proximity
+            days_diff = abs(contact["days_from_test1"] - contact["days_from_test2"])
+            confidence = max(
+                0.1, 1.0 - (days_diff / 28.0)
+            )  # Higher confidence for closer test dates
+
+            # Determine direction based on test dates
+            p1_test_date = None
+            p2_test_date = None
+
+            for _, test in positive_tests.iterrows():
+                if test["patient_id"] == contact["patient1"]:
+                    p1_test_date = test["collection_date"].strftime("%Y-%m-%d")
+                elif test["patient_id"] == contact["patient2"]:
+                    p2_test_date = test["collection_date"].strftime("%Y-%m-%d")
+
+            if p1_test_date and p2_test_date:
+                # Assume earlier positive test is source
+                if p1_test_date <= p2_test_date:
+                    source, target = contact["patient1"], contact["patient2"]
+                    source_date, target_date = p1_test_date, p2_test_date
+                else:
+                    source, target = contact["patient2"], contact["patient1"]
+                    source_date, target_date = p2_test_date, p1_test_date
+
+                spread_events.append(
+                    {
+                        "event_id": f"spread_{infection_type}_{i}",
+                        "source_patient": source,
+                        "target_patient": target,
+                        "infection": infection_type,
+                        "contact_date": contact["contact_date"].strftime("%Y-%m-%d"),
+                        "contact_location": contact["location"],
+                        "source_test_date": source_date,
+                        "target_test_date": target_date,
+                        "days_between_tests": abs(
+                            (
+                                datetime.strptime(target_date, "%Y-%m-%d")
+                                - datetime.strptime(source_date, "%Y-%m-%d")
+                            ).days
+                        ),
+                        "confidence_score": round(confidence, 2),
+                    }
+                )
+
+        # Generate network nodes
+        patient_contact_counts = defaultdict(int)
+        for contact in infection_contacts:
+            patient_contact_counts[contact["patient1"]] += 1
+            patient_contact_counts[contact["patient2"]] += 1
+
+        network_nodes = []
+        for patient_id in infection_patients:
+            patient_tests = positive_tests[positive_tests["patient_id"] == patient_id]
+            first_positive = (
+                patient_tests["collection_date"].min()
+                if len(patient_tests) > 0
+                else None
+            )
+
+            # Find cluster membership
+            cluster_id = None
+            for i, group in enumerate(self.contact_groups):
+                if patient_id in group:
+                    cluster_id = i + 1
+                    break
+
+            network_nodes.append(
+                {
+                    "id": patient_id,
+                    "infections": [infection_type],
+                    "primary_infection": infection_type,
+                    "first_positive_date": first_positive.strftime("%Y-%m-%d")
+                    if first_positive is not None
+                    else None,
+                    "total_contacts": patient_contact_counts[patient_id],
+                    "node_size": min(
+                        50, 10 + patient_contact_counts[patient_id] * 5
+                    ),  # Visual scaling
+                    "cluster_id": cluster_id,
+                }
+            )
+
+        # Generate network edges
+        network_edges = []
+        for contact in infection_contacts:
+            # Calculate edge strength based on temporal factors
+            days_diff = abs(contact["days_from_test1"] - contact["days_from_test2"])
+            strength = max(0.1, 1.0 - (days_diff / 28.0))
+
+            network_edges.append(
+                {
+                    "source": contact["patient1"],
+                    "target": contact["patient2"],
+                    "infection": infection_type,
+                    "contact_date": contact["contact_date"].strftime("%Y-%m-%d"),
+                    "location": contact["location"],
+                    "strength": round(strength, 2),
+                }
+            )
+
+        # Sort timeline events by date
+        timeline_events.sort(key=lambda x: x["date"])
+
+        # Calculate date range
+        if all_dates:
+            # Convert all dates to datetime objects for consistent comparison
+            datetime_dates = []
+            for d in all_dates:
+                if hasattr(d, "date"):  # It's already a datetime/timestamp
+                    datetime_dates.append(d)
+                else:  # It's a date object
+                    datetime_dates.append(datetime.combine(d, datetime.min.time()))
+
+            min_date = min(datetime_dates)
+            max_date = max(datetime_dates)
+
+            date_range = {
+                "earliest": min_date.strftime("%Y-%m-%d"),
+                "latest": max_date.strftime("%Y-%m-%d"),
+            }
+            date_span_days = (max_date.date() - min_date.date()).days
+        else:
+            date_range = {"earliest": None, "latest": None}
+            date_span_days = 0
+
+        # Generate statistics
+        stats = {
+            "total_patients": len(infection_patients),
+            "total_contacts": len(infection_contacts),
+            "total_spread_events": len(spread_events),
+            "avg_confidence_score": sum(s["confidence_score"] for s in spread_events)
+            / len(spread_events)
+            if spread_events
+            else 0,
+            "date_span_days": date_span_days,
+            "locations_involved": len(set(c["location"] for c in infection_contacts)),
+        }
+
+        return {
+            "infection_type": infection_type,
+            "timeline_events": timeline_events,
+            "spread_events": spread_events,
+            "network_nodes": network_nodes,
+            "network_edges": network_edges,
+            "date_range": date_range,
+            "stats": stats,
+        }
+
+    def _generate_all_infections_spread(self) -> dict[str, Any]:
+        """Generate spread visualization data for all infections."""
+        unique_infections = list(set(c["organism"] for c in self.contacts))
+
+        infections_data = {}
+        combined_timeline = []
+        cross_infection_events = []
+
+        # Generate data for each infection
+        for infection in unique_infections:
+            infection_data = self._generate_single_infection_spread(infection)
+            infections_data[infection] = infection_data
+            combined_timeline.extend(infection_data["timeline_events"])
+
+        # Find patients with multiple infections
+        patient_infections = defaultdict(set)
+        for contact in self.contacts:
+            patient_infections[contact["patient1"]].add(contact["organism"])
+            patient_infections[contact["patient2"]].add(contact["organism"])
+
+        # Identify cross-infection events
+        for patient_id, infections in patient_infections.items():
+            if len(infections) > 1:
+                patient_tests = self.df_positive[
+                    self.df_positive["patient_id"] == patient_id
+                ]
+                for _, test in patient_tests.iterrows():
+                    cross_infection_events.append(
+                        {
+                            "patient_id": patient_id,
+                            "infection": test["infection"],
+                            "test_date": test["collection_date"].strftime("%Y-%m-%d"),
+                            "all_patient_infections": list(infections),
+                        }
+                    )
+
+        # Sort combined timeline
+        combined_timeline.sort(key=lambda x: x["date"])
+
+        # Global statistics
+        global_stats = {
+            "total_infections": len(unique_infections),
+            "total_patients": len(
+                set(p for c in self.contacts for p in [c["patient1"], c["patient2"]])
+            ),
+            "total_contacts": len(self.contacts),
+            "patients_with_multiple_infections": len(
+                [p for p, infs in patient_infections.items() if len(infs) > 1]
+            ),
+            "cross_infection_events": len(cross_infection_events),
+            "most_connected_infection": max(
+                unique_infections,
+                key=lambda x: len([c for c in self.contacts if c["organism"] == x]),
+            )
+            if unique_infections
+            else None,
+        }
+
+        return {
+            "infections": infections_data,
+            "combined_timeline": combined_timeline,
+            "cross_infection_events": cross_infection_events,
+            "global_stats": global_stats,
+        }
+
     def generate_summary_metrics(
         self, graph_data: dict, clusters: list[dict]
     ) -> dict[str, Any]:

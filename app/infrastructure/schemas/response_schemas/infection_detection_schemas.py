@@ -2,6 +2,8 @@
 Response schemas for infection detection API endpoints.
 """
 
+from typing import Any
+
 from pydantic import BaseModel, Field
 
 
@@ -206,3 +208,100 @@ class PatientListResponse(BaseModel):
     unique_infections: list[str] = Field(
         ..., description="List of unique infection types found"
     )
+
+
+class SpreadEventSchema(BaseModel):
+    """Schema for infection spread event."""
+
+    event_id: str = Field(..., description="Unique event identifier")
+    source_patient: str = Field(..., description="Source patient ID")
+    target_patient: str = Field(..., description="Target patient ID")
+    infection: str = Field(..., description="Infection type")
+    contact_date: str = Field(..., description="Date of contact (YYYY-MM-DD)")
+    contact_location: str = Field(..., description="Location where contact occurred")
+    source_test_date: str = Field(..., description="Source patient's test date")
+    target_test_date: str = Field(..., description="Target patient's test date")
+    days_between_tests: int = Field(..., description="Days between the two test dates")
+    confidence_score: float = Field(
+        ..., description="Confidence score (0-1) based on temporal proximity"
+    )
+
+
+class TimelineEventSchema(BaseModel):
+    """Schema for timeline visualization events."""
+
+    date: str = Field(..., description="Event date (YYYY-MM-DD)")
+    event_type: str = Field(
+        ..., description="Event type: 'positive_test', 'contact', 'transfer'"
+    )
+    patient_id: str = Field(..., description="Patient ID")
+    infection: str | None = Field(None, description="Infection type (for test events)")
+    location: str | None = Field(
+        None, description="Location (for transfer/contact events)"
+    )
+    related_patient: str | None = Field(
+        None, description="Related patient ID (for contact events)"
+    )
+    details: dict[str, Any] = Field(
+        default_factory=dict, description="Additional event details"
+    )
+
+
+class NetworkNodeSchema(BaseModel):
+    """Schema for network visualization node."""
+
+    id: str = Field(..., description="Patient ID")
+    infections: list[str] = Field(..., description="List of infections")
+    primary_infection: str = Field(..., description="Most significant infection")
+    first_positive_date: str | None = Field(
+        None, description="First positive test date"
+    )
+    total_contacts: int = Field(..., description="Number of contacts")
+    node_size: int = Field(..., description="Visual size based on contact count")
+    cluster_id: int | None = Field(None, description="Cluster membership ID")
+
+
+class NetworkEdgeSchema(BaseModel):
+    """Schema for network visualization edge."""
+
+    source: str = Field(..., description="Source patient ID")
+    target: str = Field(..., description="Target patient ID")
+    infection: str = Field(..., description="Shared infection")
+    contact_date: str = Field(..., description="Contact date")
+    location: str = Field(..., description="Contact location")
+    strength: float = Field(..., description="Connection strength (0-1)")
+
+
+class SpreadVisualizationResponse(BaseModel):
+    """Response schema for spread visualization data."""
+
+    infection_type: str = Field(..., description="Infection being visualized")
+    timeline_events: list[TimelineEventSchema] = Field(
+        ..., description="Chronological events"
+    )
+    spread_events: list[SpreadEventSchema] = Field(
+        ..., description="Potential transmission events"
+    )
+    network_nodes: list[NetworkNodeSchema] = Field(
+        ..., description="Patients as network nodes"
+    )
+    network_edges: list[NetworkEdgeSchema] = Field(
+        ..., description="Connections between patients"
+    )
+    date_range: DateRangeSchema = Field(..., description="Date range of events")
+    stats: dict[str, Any] = Field(..., description="Visualization statistics")
+
+
+class AllInfectionsVisualizationResponse(BaseModel):
+    """Response schema for all infections visualization."""
+
+    infections: dict[str, SpreadVisualizationResponse] = Field(
+        ..., description="Data by infection type"
+    )
+    combined_timeline: list[TimelineEventSchema] = Field(
+        ..., description="Combined timeline across all infections"
+    )
+    cross_infection_events: list[dict[str, Any]] = Field(
+        ..., description="Events involving multiple infections"
+    )
+    global_stats: dict[str, Any] = Field(..., description="Overall statistics")

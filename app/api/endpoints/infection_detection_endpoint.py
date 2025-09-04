@@ -9,10 +9,12 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, status
 
 from app.infrastructure.schemas.response_schemas.infection_detection_schemas import (
+    AllInfectionsVisualizationResponse,
     InfectionDetectionRequest,
     InfectionDetectionResponse,
     PatientDetailSchema,
     PatientListResponse,
+    SpreadVisualizationResponse,
     SummaryMetricsSchema,
 )
 from app.infrastructure.services import infection_detection_service
@@ -256,6 +258,132 @@ async def get_patient_by_id(patient_id: str) -> PatientDetailSchema:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error retrieving data for patient {patient_id}",
+        )
+
+
+@router.get(
+    "/spread-visualization",
+    response_model=AllInfectionsVisualizationResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Get spread visualization data for all infections",
+    description="""
+    Generate comprehensive spread visualization data for React components including:
+    - Timeline of all infection events (tests, contacts, transfers)
+    - Network graph data (nodes and edges)
+    - Spread events with confidence scores
+    - Cross-infection analysis
+    - Statistics for dashboard widgets
+    
+    Perfect for creating animated timeline visualizations, network graphs,
+    and epidemiological analysis dashboards.
+    """,
+)
+async def get_spread_visualization() -> AllInfectionsVisualizationResponse:
+    """
+    Get comprehensive spread visualization data for all infections.
+
+    Returns:
+        AllInfectionsVisualizationResponse: Complete visualization data including
+        timeline events, network data, spread analysis, and statistics
+
+    Raises:
+        HTTPException: If data files are missing or analysis fails
+    """
+    try:
+        logger.info("Generating spread visualization for all infections")
+
+        visualization_data = infection_detection_service.generate_spread_visualization()
+
+        logger.info(
+            f"Generated spread visualization: {visualization_data['global_stats']['total_infections']} infections, "
+            f"{visualization_data['global_stats']['total_patients']} patients"
+        )
+
+        return AllInfectionsVisualizationResponse(**visualization_data)
+
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Required data files not found in app/data/",
+        )
+
+    except Exception as e:
+        logger.error(f"Error generating spread visualization: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error generating spread visualization data",
+        )
+
+
+@router.get(
+    "/spread-visualization/{infection_type}",
+    response_model=SpreadVisualizationResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Get spread visualization data for specific infection",
+    description="""
+    Generate detailed spread visualization data for a specific infection type.
+    
+    Includes:
+    - Chronological timeline of events (positive tests, contacts)
+    - Potential transmission events with confidence scores
+    - Network graph nodes and edges
+    - Statistics and date ranges
+    
+    Use this for focused analysis of a single infection type's spread pattern.
+    Common infection types: CRE, MRSA, VRE, ESBL
+    """,
+)
+async def get_infection_spread_visualization(
+    infection_type: str,
+) -> SpreadVisualizationResponse:
+    """
+    Get spread visualization data for a specific infection type.
+
+    Args:
+        infection_type: The infection type to visualize (e.g., 'CRE', 'MRSA', 'VRE', 'ESBL')
+
+    Returns:
+        SpreadVisualizationResponse: Visualization data for the specified infection
+
+    Raises:
+        HTTPException: If infection type not found or data cannot be processed
+    """
+    try:
+        logger.info(f"Generating spread visualization for infection: {infection_type}")
+
+        visualization_data = infection_detection_service.generate_spread_visualization(
+            infection_type
+        )
+
+        if not visualization_data.get("network_nodes"):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"No spread data found for infection type: {infection_type}",
+            )
+
+        logger.info(
+            f"Generated {infection_type} visualization: {visualization_data['stats']['total_patients']} patients, "
+            f"{visualization_data['stats']['total_contacts']} contacts"
+        )
+
+        return SpreadVisualizationResponse(**visualization_data)
+
+    except HTTPException:
+        raise  # Re-raise HTTP exceptions
+
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Required data files not found in app/data/",
+        )
+
+    except Exception as e:
+        logger.error(
+            f"Error generating {infection_type} spread visualization: {str(e)}"
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error generating spread visualization for {infection_type}",
         )
 
 

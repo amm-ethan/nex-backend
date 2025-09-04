@@ -6,6 +6,7 @@ Supports LangChain + Ollama with OpenAI fallback.
 import logging
 from typing import Any
 
+import requests
 from langchain_community.llms import Ollama
 from langchain_core.messages import HumanMessage
 from langchain_openai import ChatOpenAI
@@ -39,7 +40,6 @@ class LLMAnalyzerService:
         """Initialize LLM clients based on available configurations."""
         try:
             # Check for Ollama availability
-            import requests
 
             response = requests.get(f"{settings.OLLAMA_URL}/api/tags", timeout=5)
             if response.status_code == 200:
@@ -190,7 +190,7 @@ REQUIREMENTS:
         return summary
 
     def _extract_insights_and_recommendations(
-            self, summary: str, cluster_data: dict[str, Any]
+        self, summary: str, cluster_data: dict[str, Any]
     ) -> tuple[list[str], list[str]]:
         """Extract key insights and recommendations from cluster data."""
         insights = []
@@ -262,7 +262,7 @@ REQUIREMENTS:
             return "LOW"
 
     async def generate_cluster_summary(
-            self, cluster_data: dict[str, Any]
+        self, cluster_data: dict[str, Any]
     ) -> ClusterSummary:
         """
         Generate clinical summary for an infection cluster.
@@ -315,7 +315,7 @@ REQUIREMENTS:
         )
 
     async def generate_multiple_cluster_summaries(
-            self, clusters_data: list[dict[str, Any]]
+        self, clusters_data: list[dict[str, Any]]
     ) -> list[ClusterSummary]:
         """
         Generate summaries for multiple clusters.

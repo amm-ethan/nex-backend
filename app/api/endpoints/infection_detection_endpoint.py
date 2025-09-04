@@ -2,14 +2,17 @@
 API endpoints for infection detection functionality.
 """
 
+import json
 import logging
 from datetime import datetime
 
 from fastapi import APIRouter, HTTPException, status
+from fastapi.responses import StreamingResponse
 
 from app.infrastructure.schemas.response_schemas.infection_detection_schemas import (
     AllInfectionsVisualizationResponse,
     ClusterSummariesResponse,
+    ClusterSummarySchema,
     InfectionDetectionRequest,
     InfectionDetectionResponse,
     LocationRiskResponse,
@@ -100,7 +103,6 @@ async def detect_infection_clusters(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Internal server error during infection cluster detection",
         )
-
 
 
 @router.get(
@@ -400,7 +402,7 @@ async def get_location_risk_heatmaps() -> LocationRiskResponse:
 
 
 @router.get(
-    "/llm",
+    "/llm/cluster_summary/all",
     response_model=ClusterSummariesResponse,
     status_code=status.HTTP_200_OK,
     summary="Get LLM-generated clinical summaries for infection clusters",
@@ -487,17 +489,211 @@ async def get_cluster_summaries() -> ClusterSummariesResponse:
             },
         )
 
-    except FileNotFoundError:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Required data files not found in app/data/",
-        )
-
     except Exception as e:
         logger.error(f"Error generating cluster summaries: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error generating cluster summaries",
+        )
+
+
+@router.get(
+    "/llm/cluster_summary/{cluster_id}",
+    response_class=StreamingResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Get LLM-generated clinical summary for a specific cluster (streaming)",
+    description="""
+    Generate a clinical summary for a specific infection cluster using LLM analysis:
+    
+    - Uses LangChain + Ollama (preferred) or OpenAI as fallback
+    - Plain-language summary ≤120 words for clinicians
+    - Risk assessment and actionable recommendations
+    - Falls back to mock summary if no LLM is available
+    - Streaming response for better user experience
+    - Returns JSON data as Server-Sent Events (SSE)
+    """,
+)
+async def get_specific_cluster_summary(cluster_id: int):
+    """
+    Generate clinical summary for a specific cluster with streaming response.
+
+    Args:
+        cluster_id: The cluster ID to generate summary for
+
+    Returns:
+        StreamingResponse: JSON data streamed as Server-Sent Events
+
+    Raises:
+        HTTPException: If cluster not found or analysis fails
+    """
+
+    async def generate_stream():
+        try:
+            logger.info(
+                f"Starting streaming summary generation for cluster {cluster_id}"
+            )
+
+            # Send initial status
+            yield f"data: {{'status': 'starting', 'cluster_id': {cluster_id}, 'message': 'Initializing analysis...'}}\n\n"
+
+            # Ensure we have cluster data
+            if not infection_detection_service.contacts:
+                yield "data: {'status': 'loading', 'message': 'Running infection detection pipeline...'}\n\n"
+                await infection_detection_service.run_detection_pipeline()
+
+            # Get all clusters data
+            yield "data: {'status': 'processing', 'message': 'Retrieving cluster data...'}\n\n"
+            clusters_data = infection_detection_service.generate_cluster_data()
+
+            # Find the specific cluster
+            target_cluster = None
+            for cluster in clusters_data:
+                if cluster.get("cluster_id") == cluster_id:
+                    target_cluster = cluster
+                    break
+
+            if not target_cluster:
+                yield f"data: {{'status': 'error', 'error': 'Cluster {cluster_id} not found', 'available_clusters': {[c.get('cluster_id', 0) for c in clusters_data]}}}\n\n"
+                return
+
+            yield f"data: {{'status': 'analyzing', 'message': 'Generating clinical summary with LLM...', 'llm_status': {{'ollama_available': {str(llm_analyzer_service.ollama_available).lower()}, 'openai_available': {str(llm_analyzer_service.openai_available).lower()}}}}}\n\n"
+
+            # Generate summary using LLM
+            summary = await llm_analyzer_service.generate_cluster_summary(
+                target_cluster
+            )
+
+            # Send the final result
+            result_data = {
+                "status": "completed",
+                "cluster_summary": {
+                    "cluster_id": summary.cluster_id,
+                    "clinical_summary": summary.clinical_summary,
+                    "risk_level": summary.risk_level,
+                    "key_insights": summary.key_insights,
+                    "recommendations": summary.recommendations,
+                    "generated_by": summary.generated_by,
+                },
+                "cluster_info": {
+                    "patient_count": target_cluster.get("patient_count", 0),
+                    "infections": target_cluster.get("infections", []),
+                    "locations": target_cluster.get("locations", []),
+                    "date_range": target_cluster.get("date_range", {}),
+                },
+                "generation_metadata": {
+                    "generated_at": datetime.now().isoformat(),
+                    "llm_source": summary.generated_by,
+                    "processing_time_note": "Streamed response for better UX",
+                },
+            }
+
+            yield f"data: {json.dumps(result_data)}\n\n"
+
+            logger.info(
+                f"Completed streaming summary for cluster {cluster_id} using {summary.generated_by}"
+            )
+
+        except Exception as e:
+            logger.error(
+                f"Error in streaming summary generation for cluster {cluster_id}: {str(e)}"
+            )
+
+            error_data = {
+                "status": "error",
+                "cluster_id": cluster_id,
+                "error": str(e),
+                "message": "Failed to generate cluster summary",
+            }
+            yield f"data: {json.dumps(error_data)}\n\n"
+
+    return StreamingResponse(
+        generate_stream(),
+        media_type="text/plain",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "Access-Control-Allow-Origin": "*",
+        },
+    )
+
+
+@router.get(
+    "/llm/cluster_summary/{cluster_id}/json",
+    response_model=ClusterSummarySchema,
+    status_code=status.HTTP_200_OK,
+    summary="Get LLM-generated clinical summary for a specific cluster (JSON response)",
+    description="""
+    Generate a clinical summary for a specific infection cluster using LLM analysis:
+    
+    - Uses LangChain + Ollama (preferred) or OpenAI as fallback
+    - Plain-language summary ≤120 words for clinicians
+    - Risk assessment and actionable recommendations
+    - Falls back to mock summary if no LLM is available
+    - Standard JSON response (use streaming version for better UX)
+    """,
+)
+async def get_specific_cluster_summary_json(cluster_id: int) -> ClusterSummarySchema:
+    """
+    Generate clinical summary for a specific cluster with JSON response.
+
+    Args:
+        cluster_id: The cluster ID to generate summary for
+
+    Returns:
+        ClusterSummarySchema: Clinical summary with risk assessment and recommendations
+
+    Raises:
+        HTTPException: If cluster not found or analysis fails
+    """
+    try:
+        logger.info(f"Generating JSON summary for cluster {cluster_id}")
+
+        # Ensure we have cluster data
+        if not infection_detection_service.contacts:
+            logger.info("No analysis found, running detection pipeline")
+            await infection_detection_service.run_detection_pipeline()
+
+        # Get all clusters data
+        clusters_data = infection_detection_service.generate_cluster_data()
+
+        # Find the specific cluster
+        target_cluster = None
+        for cluster in clusters_data:
+            if cluster.get("cluster_id") == cluster_id:
+                target_cluster = cluster
+                break
+
+        if not target_cluster:
+            available_clusters = [c.get("cluster_id", 0) for c in clusters_data]
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Cluster {cluster_id} not found. Available clusters: {available_clusters}",
+            )
+
+        # Generate summary using LLM
+        summary = await llm_analyzer_service.generate_cluster_summary(target_cluster)
+
+        logger.info(
+            f"Generated summary for cluster {cluster_id} using {summary.generated_by}"
+        )
+
+        return ClusterSummarySchema(
+            cluster_id=summary.cluster_id,
+            clinical_summary=summary.clinical_summary,
+            risk_level=summary.risk_level,
+            key_insights=summary.key_insights,
+            recommendations=summary.recommendations,
+            generated_by=summary.generated_by,
+        )
+
+    except HTTPException:
+        raise  # Re-raise HTTP exceptions
+
+    except Exception as e:
+        logger.error(f"Error generating summary for cluster {cluster_id}: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error generating summary for cluster {cluster_id}",
         )
 
 
@@ -542,5 +738,3 @@ async def get_temporal_patterns() -> TemporalPatternsResponse:
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error generating temporal patterns data",
         )
-
-

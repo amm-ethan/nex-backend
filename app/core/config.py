@@ -27,6 +27,9 @@ class Settings(BaseSettings):
     ERROR_LOG_LOCATION: str = "storage/logs/errors"
     TRACE_LOG_LOCATION: str = "storage/logs/traces"
 
+    MICROBIOLOGY_FILE_LOCATION: str = "app/data/microbiology.csv"
+    TRANSFERS_FILE_LOCATION: str = "app/data/transfers.csv"
+
     # Environment
     ENVIRONMENT: str = "production"  # e.g., development, staging, production
 
@@ -54,6 +57,8 @@ for directory_path_str in [
 
 error_log_directory = PROJECT_ROOT / settings.ERROR_LOG_LOCATION
 trace_log_directory = PROJECT_ROOT / settings.TRACE_LOG_LOCATION
+microbiology_file = PROJECT_ROOT / settings.MICROBIOLOGY_FILE_LOCATION
+transfers_file = PROJECT_ROOT / settings.TRANSFERS_FILE_LOCATION
 
 # Logger Config
 logger_config = {

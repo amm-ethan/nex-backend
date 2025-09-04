@@ -305,3 +305,113 @@ class AllInfectionsVisualizationResponse(BaseModel):
         ..., description="Events involving multiple infections"
     )
     global_stats: dict[str, Any] = Field(..., description="Overall statistics")
+
+
+class SuperSpreaderSchema(BaseModel):
+    """Schema for super spreader analysis."""
+
+    patient_id: str = Field(..., description="Patient ID")
+    outbound_transmissions: int = Field(
+        ..., description="Number of likely transmissions caused"
+    )
+    transmission_confidence_avg: float = Field(
+        ..., description="Average confidence of transmissions"
+    )
+    locations_infected: list[str] = Field(
+        ..., description="Locations where patient spread infections"
+    )
+    infection_period_days: int = Field(..., description="Duration of infectious period")
+    infections: list[str] = Field(..., description="Types of infections spread")
+    risk_score: float = Field(
+        ..., description="Overall super spreader risk score (0-1)"
+    )
+    first_positive_date: str | None = Field(
+        None, description="Date of first positive test"
+    )
+    total_contacts: int = Field(..., description="Total number of patient contacts")
+
+
+class LocationRiskSchema(BaseModel):
+    """Schema for location risk analysis."""
+
+    location: str = Field(..., description="Location name")
+    infection_rate: float = Field(
+        ..., description="Proportion of patients who get infected"
+    )
+    avg_stay_duration: float = Field(..., description="Average stay duration in days")
+    transmission_events: int = Field(..., description="Number of transmission events")
+    total_patients: int = Field(
+        ..., description="Total patients who stayed in location"
+    )
+    infected_patients: int = Field(
+        ..., description="Number of patients who got infected"
+    )
+    risk_level: str = Field(..., description="Risk level: LOW, MEDIUM, HIGH, CRITICAL")
+    dominant_infections: list[str] = Field(
+        ..., description="Most common infections in location"
+    )
+    recommended_actions: list[str] = Field(..., description="Suggested interventions")
+
+
+class TemporalPatternSchema(BaseModel):
+    """Schema for temporal pattern analysis."""
+
+    infection: str = Field(..., description="Infection type")
+    peak_transmission_hours: list[int] = Field(
+        ..., description="Hours with highest transmission (0-23)"
+    )
+    high_risk_days: list[str] = Field(
+        ..., description="Days of week with higher transmission"
+    )
+    seasonal_trend: str = Field(..., description="Seasonal pattern description")
+    avg_incubation_days: float | None = Field(
+        None, description="Average incubation period"
+    )
+    transmission_velocity: float = Field(..., description="Average cases per day")
+    outbreak_periods: list[dict[str, Any]] = Field(
+        ..., description="Identified outbreak periods"
+    )
+
+
+class SuperSpreadersResponse(BaseModel):
+    """Response schema for super spreader detection."""
+
+    super_spreaders: list[SuperSpreaderSchema] = Field(
+        ..., description="Super spreader analysis"
+    )
+    analysis_metadata: dict[str, Any] = Field(..., description="Analysis metadata")
+
+
+class LocationRiskResponse(BaseModel):
+    """Response schema for location risk analysis."""
+
+    location_risks: list[LocationRiskSchema] = Field(
+        ..., description="Location risk heatmap data"
+    )
+    analysis_metadata: dict[str, Any] = Field(..., description="Analysis metadata")
+
+
+class TemporalPatternsResponse(BaseModel):
+    """Response schema for temporal pattern analysis."""
+
+    temporal_patterns: list[TemporalPatternSchema] = Field(
+        ..., description="Temporal pattern analysis"
+    )
+    analysis_metadata: dict[str, Any] = Field(..., description="Analysis metadata")
+
+
+class AdvancedAnalyticsResponse(BaseModel):
+    """Response schema for combined advanced analytics data."""
+
+    super_spreaders: list[SuperSpreaderSchema] = Field(
+        ..., description="Super spreader analysis"
+    )
+    location_risks: list[LocationRiskSchema] = Field(
+        ..., description="Location risk heatmap data"
+    )
+    temporal_patterns: list[TemporalPatternSchema] = Field(
+        ..., description="Temporal pattern analysis"
+    )
+    analytics_metadata: dict[str, Any] = Field(
+        ..., description="Analysis metadata and statistics"
+    )

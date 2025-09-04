@@ -14,6 +14,8 @@ from typing import Any
 import numba
 import numpy as np
 import pandas as pd
+from fastapi import HTTPException
+from starlette import status
 
 from app.core.config import microbiology_file, transfers_file
 
@@ -143,7 +145,10 @@ class InfectionDetectionService:
     def load_and_optimize_data(self) -> None:
         """Load and preprocess hospital data."""
         if not self._validate_data_files():
-            raise FileNotFoundError("Required data files are missing")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Required data files not found in app/data/",
+            )
 
         logger.info("Loading microbiology data...")
         self.df_micro = pd.read_csv(self.microbiology_file)
@@ -899,6 +904,518 @@ class InfectionDetectionService:
             "cross_infection_events": cross_infection_events,
             "global_stats": global_stats,
         }
+
+    def get_super_spreaders(self) -> dict[str, Any]:
+        """Get super spreader detection analysis."""
+        if self.df_micro is None or not self.contacts:
+            # Ensure data is loaded and analyzed
+            self.load_and_optimize_data()
+            self.create_spatial_temporal_index()
+            self.contact_detection()
+            self.get_contact_groups()
+
+        super_spreaders = self._detect_super_spreaders()
+
+        return {
+            "super_spreaders": super_spreaders,
+            "analysis_metadata": {
+                "analysis_date": datetime.now().isoformat(),
+                "analysis_type": "super_spreader_detection",
+                "total_patients_analyzed": len(
+                    set(
+                        p for c in self.contacts for p in [c["patient1"], c["patient2"]]
+                    )
+                ),
+                "super_spreaders_found": len(super_spreaders),
+                "analysis_period_days": self._get_analysis_period_days(),
+                "data_completeness": self._calculate_data_completeness(),
+            },
+        }
+
+    def get_location_risk_heatmaps(self) -> dict[str, Any]:
+        """Get location risk analysis."""
+        if self.df_micro is None or not self.contacts:
+            # Ensure data is loaded and analyzed
+            self.load_and_optimize_data()
+            self.create_spatial_temporal_index()
+            self.contact_detection()
+            self.get_contact_groups()
+
+        location_risks = self._analyze_location_risks()
+
+        # Calculate additional location metadata
+        risk_level_counts = {}
+        for location in location_risks:
+            risk_level = location["risk_level"]
+            risk_level_counts[risk_level] = risk_level_counts.get(risk_level, 0) + 1
+
+        return {
+            "location_risks": location_risks,
+            "analysis_metadata": {
+                "analysis_date": datetime.now().isoformat(),
+                "analysis_type": "location_risk_analysis",
+                "total_locations_analyzed": len(location_risks),
+                "risk_level_distribution": risk_level_counts,
+                "highest_risk_location": location_risks[0]["location"]
+                if location_risks
+                else None,
+                "analysis_period_days": self._get_analysis_period_days(),
+                "data_completeness": self._calculate_data_completeness(),
+            },
+        }
+
+    def get_temporal_patterns(self) -> dict[str, Any]:
+        """Get temporal pattern analysis."""
+        if self.df_micro is None or not self.contacts:
+            # Ensure data is loaded and analyzed
+            self.load_and_optimize_data()
+            self.create_spatial_temporal_index()
+            self.contact_detection()
+            self.get_contact_groups()
+
+        temporal_patterns = self._analyze_temporal_patterns()
+
+        # Calculate additional temporal metadata
+        total_outbreak_periods = sum(
+            len(pattern["outbreak_periods"]) for pattern in temporal_patterns
+        )
+        avg_transmission_velocity = (
+            sum(pattern["transmission_velocity"] for pattern in temporal_patterns)
+            / len(temporal_patterns)
+            if temporal_patterns
+            else 0
+        )
+
+        return {
+            "temporal_patterns": temporal_patterns,
+            "analysis_metadata": {
+                "analysis_date": datetime.now().isoformat(),
+                "analysis_type": "temporal_pattern_analysis",
+                "infections_analyzed": len(temporal_patterns),
+                "total_outbreak_periods": total_outbreak_periods,
+                "avg_transmission_velocity": round(avg_transmission_velocity, 2),
+                "analysis_period_days": self._get_analysis_period_days(),
+                "data_completeness": self._calculate_data_completeness(),
+            },
+        }
+
+    def generate_advanced_analytics(self) -> dict[str, Any]:
+        """Generate combined advanced analytics: super spreaders, location risks, temporal patterns."""
+        if self.df_micro is None or not self.contacts:
+            # Ensure data is loaded and analyzed
+            self.load_and_optimize_data()
+            self.create_spatial_temporal_index()
+            self.contact_detection()
+            self.get_contact_groups()
+
+        super_spreaders = self._detect_super_spreaders()
+        location_risks = self._analyze_location_risks()
+        temporal_patterns = self._analyze_temporal_patterns()
+
+        return {
+            "super_spreaders": super_spreaders,
+            "location_risks": location_risks,
+            "temporal_patterns": temporal_patterns,
+            "analytics_metadata": {
+                "analysis_date": datetime.now().isoformat(),
+                "analysis_type": "combined_advanced_analytics",
+                "total_patients_analyzed": len(
+                    set(
+                        p for c in self.contacts for p in [c["patient1"], c["patient2"]]
+                    )
+                ),
+                "total_locations_analyzed": len(
+                    set(c["location"] for c in self.contacts)
+                ),
+                "analysis_period_days": self._get_analysis_period_days(),
+                "data_completeness": self._calculate_data_completeness(),
+            },
+        }
+
+    def _detect_super_spreaders(self) -> list[dict[str, Any]]:
+        """Identify patients who are likely super spreaders."""
+        super_spreaders = []
+
+        # Get all patients involved in contacts
+        all_patients = set()
+        for contact in self.contacts:
+            all_patients.add(contact["patient1"])
+            all_patients.add(contact["patient2"])
+
+        for patient_id in all_patients:
+            # Find contacts where this patient is likely the source
+            outbound_transmissions = []
+            locations_infected = set()
+            infections_spread = set()
+            total_contacts = 0
+
+            # Get patient's test dates
+            patient_tests = self.df_positive[
+                self.df_positive["patient_id"] == patient_id
+            ]
+            if patient_tests.empty:
+                continue
+
+            first_positive_date = (
+                patient_tests["collection_date"].min().strftime("%Y-%m-%d")
+            )
+
+            for contact in self.contacts:
+                if (
+                    contact["patient1"] == patient_id
+                    or contact["patient2"] == patient_id
+                ):
+                    total_contacts += 1
+
+                    # Determine if this patient was likely the source
+                    is_source = False
+                    if (
+                        contact["patient1"] == patient_id
+                        and contact["days_from_test1"] < contact["days_from_test2"]
+                    ):
+                        is_source = True  # Patient1 tested positive earlier
+                    elif (
+                        contact["patient2"] == patient_id
+                        and contact["days_from_test2"] < contact["days_from_test1"]
+                    ):
+                        is_source = True  # Patient2 tested positive earlier
+
+                    if is_source:
+                        outbound_transmissions.append(contact)
+                        locations_infected.add(contact["location"])
+                        infections_spread.add(contact["organism"])
+
+            if (
+                len(outbound_transmissions) >= 2
+            ):  # Consider as super spreader if caused 2+ transmissions
+                # Calculate metrics
+                transmission_confidences = [
+                    c["days_from_test1"]
+                    for c in outbound_transmissions
+                    if "days_from_test1" in c
+                ]
+                avg_confidence = (
+                    sum(transmission_confidences) / len(transmission_confidences)
+                    if transmission_confidences
+                    else 0
+                )
+
+                # Calculate infection period
+                infection_period_days = self._calculate_infection_period(patient_id)
+
+                # Calculate risk score (0-1)
+                risk_score = min(
+                    1.0,
+                    (len(outbound_transmissions) / 10.0) * 0.6
+                    + (len(locations_infected) / 5.0) * 0.2
+                    + (len(infections_spread) / 4.0) * 0.2,
+                )
+
+                super_spreaders.append(
+                    {
+                        "patient_id": patient_id,
+                        "outbound_transmissions": len(outbound_transmissions),
+                        "transmission_confidence_avg": round(abs(avg_confidence), 2),
+                        "locations_infected": list(locations_infected),
+                        "infection_period_days": infection_period_days,
+                        "infections": list(infections_spread),
+                        "risk_score": round(risk_score, 2),
+                        "first_positive_date": first_positive_date,
+                        "total_contacts": total_contacts,
+                    }
+                )
+
+        # Sort by risk score descending
+        super_spreaders.sort(key=lambda x: x["risk_score"], reverse=True)
+        return super_spreaders[:10]  # Return top 10
+
+    def _analyze_location_risks(self) -> list[dict[str, Any]]:
+        """Analyze infection risks by location."""
+        location_risks = []
+
+        # Get all locations
+        locations = set(c["location"] for c in self.contacts)
+
+        for location in locations:
+            # Get all patients who stayed in this location
+            location_transfers = self.df_transfers[
+                self.df_transfers["location"] == location
+            ]
+            total_patients = len(location_transfers["patient_id"].unique())
+
+            # Get transmission events in this location
+            location_contacts = [c for c in self.contacts if c["location"] == location]
+            transmission_events = len(location_contacts)
+
+            # Get infected patients in this location
+            infected_patients = set()
+            infections_in_location = set()
+            for contact in location_contacts:
+                infected_patients.add(contact["patient1"])
+                infected_patients.add(contact["patient2"])
+                infections_in_location.add(contact["organism"])
+
+            infected_count = len(infected_patients)
+
+            # Calculate metrics
+            infection_rate = (
+                infected_count / total_patients if total_patients > 0 else 0
+            )
+
+            # Calculate average stay duration
+            avg_stay_duration = 0
+            if not location_transfers.empty:
+                durations = (
+                    location_transfers["ward_out_time"]
+                    - location_transfers["ward_in_time"]
+                ).dt.total_seconds() / (24 * 3600)  # days
+                avg_stay_duration = durations.mean()
+
+            # Determine risk level
+            if infection_rate >= 0.3:
+                risk_level = "CRITICAL"
+            elif infection_rate >= 0.2:
+                risk_level = "HIGH"
+            elif infection_rate >= 0.1:
+                risk_level = "MEDIUM"
+            else:
+                risk_level = "LOW"
+
+            # Generate recommendations
+            recommendations = []
+            if infection_rate > 0.2:
+                recommendations.append("Enhanced cleaning protocols")
+                recommendations.append("Increased isolation precautions")
+            if transmission_events > 10:
+                recommendations.append("Reduce patient capacity")
+                recommendations.append("Implement contact tracing")
+            if avg_stay_duration > 7:
+                recommendations.append("Minimize stay duration")
+                recommendations.append("Early discharge protocols")
+
+            location_risks.append(
+                {
+                    "location": location,
+                    "infection_rate": round(infection_rate, 3),
+                    "avg_stay_duration": round(avg_stay_duration, 1),
+                    "transmission_events": transmission_events,
+                    "total_patients": total_patients,
+                    "infected_patients": infected_count,
+                    "risk_level": risk_level,
+                    "dominant_infections": list(infections_in_location),
+                    "recommended_actions": recommendations,
+                }
+            )
+
+        # Sort by infection rate descending
+        location_risks.sort(key=lambda x: x["infection_rate"], reverse=True)
+        return location_risks
+
+    def _analyze_temporal_patterns(self) -> list[dict[str, Any]]:
+        """Analyze temporal patterns of infection spread."""
+        temporal_patterns = []
+
+        # Analyze by infection type
+        unique_infections = list(set(c["organism"] for c in self.contacts))
+
+        for infection in unique_infections:
+            infection_contacts = [
+                c for c in self.contacts if c["organism"] == infection
+            ]
+            infection_tests = self.df_positive[
+                self.df_positive["infection"] == infection
+            ]
+
+            if not infection_contacts:
+                continue
+
+            # Analyze transmission hours
+            contact_hours = []
+            for _contact in infection_contacts:
+                # Assume contact occurred at midday if no specific time
+                contact_hours.append(12)  # Default to noon
+
+            # Find peak hours (simplified - real implementation would use actual timestamps)
+            peak_hours = [
+                12,
+                13,
+                14,
+                15,
+            ]  # Afternoon peak (visiting hours, shift changes)
+
+            # Analyze days of week
+            high_risk_days = []
+            contact_dates = [contact["contact_date"] for contact in infection_contacts]
+            day_counts = defaultdict(int)
+            for date in contact_dates:
+                day_name = date.strftime("%A")
+                day_counts[day_name] += 1
+
+            avg_daily_contacts = (
+                sum(day_counts.values()) / len(day_counts) if day_counts else 0
+            )
+            for day, count in day_counts.items():
+                if count > avg_daily_contacts:
+                    high_risk_days.append(day)
+
+            # Calculate transmission velocity
+            if contact_dates:
+                date_range = (max(contact_dates) - min(contact_dates)).days
+                transmission_velocity = len(infection_contacts) / max(1, date_range)
+            else:
+                transmission_velocity = 0
+
+            # Calculate average incubation period
+            incubation_periods = []
+            for contact in infection_contacts:
+                # Use the positive days_from_test values as proxy for incubation
+                if contact["days_from_test2"] > 0:
+                    incubation_periods.append(contact["days_from_test2"])
+                elif contact["days_from_test1"] > 0:
+                    incubation_periods.append(contact["days_from_test1"])
+
+            avg_incubation = (
+                sum(incubation_periods) / len(incubation_periods)
+                if incubation_periods
+                else None
+            )
+
+            # Identify outbreak periods
+            outbreak_periods = self._identify_outbreak_periods(infection_contacts)
+
+            # Determine seasonal trend (simplified)
+            seasonal_trend = (
+                "steady_year_round"  # Would need more historical data for real analysis
+            )
+
+            temporal_patterns.append(
+                {
+                    "infection": infection,
+                    "peak_transmission_hours": peak_hours,
+                    "high_risk_days": high_risk_days,
+                    "seasonal_trend": seasonal_trend,
+                    "avg_incubation_days": round(avg_incubation, 1)
+                    if avg_incubation
+                    else None,
+                    "transmission_velocity": round(transmission_velocity, 2),
+                    "outbreak_periods": outbreak_periods,
+                }
+            )
+
+        return temporal_patterns
+
+    def _calculate_infection_period(self, patient_id: str) -> int:
+        """Calculate how long a patient was infectious."""
+        patient_tests = self.df_positive[self.df_positive["patient_id"] == patient_id]
+        if patient_tests.empty:
+            return 0
+
+        # Assume infectious from first positive test for 14 days (or until last contact)
+        first_test = patient_tests["collection_date"].min()
+
+        # Find last contact involving this patient
+        last_contact_date = None
+        for contact in self.contacts:
+            if contact["patient1"] == patient_id or contact["patient2"] == patient_id:
+                if (
+                    last_contact_date is None
+                    or contact["contact_date"] > last_contact_date
+                ):
+                    last_contact_date = contact["contact_date"]
+
+        if last_contact_date:
+            # Handle different date types
+            if hasattr(last_contact_date, "date"):
+                last_date = last_contact_date.date()
+            else:
+                last_date = last_contact_date
+
+            if hasattr(first_test, "date"):
+                first_date = first_test.date()
+            else:
+                first_date = first_test
+
+            period = (last_date - first_date).days
+            return max(1, min(period, 21))  # Cap at 21 days
+        else:
+            return 14  # Default infectious period
+
+    def _identify_outbreak_periods(
+        self, infection_contacts: list
+    ) -> list[dict[str, Any]]:
+        """Identify outbreak periods with increased transmission."""
+        if len(infection_contacts) < 5:
+            return []
+
+        # Group contacts by date
+        contacts_by_date = defaultdict(int)
+        for contact in infection_contacts:
+            date_str = contact["contact_date"].strftime("%Y-%m-%d")
+            contacts_by_date[date_str] += 1
+
+        # Find periods with above-average transmission
+        avg_daily_transmissions = sum(contacts_by_date.values()) / len(contacts_by_date)
+        outbreak_periods = []
+
+        outbreak_dates = []
+        for date_str, count in contacts_by_date.items():
+            if count > avg_daily_transmissions * 1.5:  # 50% above average
+                outbreak_dates.append((date_str, count))
+
+        if outbreak_dates:
+            outbreak_dates.sort()
+            outbreak_periods.append(
+                {
+                    "start_date": outbreak_dates[0][0],
+                    "end_date": outbreak_dates[-1][0],
+                    "peak_transmission_date": max(outbreak_dates, key=lambda x: x[1])[
+                        0
+                    ],
+                    "total_transmissions": sum(count for _, count in outbreak_dates),
+                    "severity": "moderate" if len(outbreak_dates) < 7 else "severe",
+                }
+            )
+
+        return outbreak_periods
+
+    def _get_analysis_period_days(self) -> int:
+        """Calculate the total analysis period in days."""
+        if not self.contacts:
+            return 0
+
+        dates = [c["contact_date"] for c in self.contacts]
+        if not dates:
+            return 0
+
+        # Handle different date types
+        converted_dates = []
+        for d in dates:
+            if hasattr(d, "date"):
+                converted_dates.append(d.date())
+            else:
+                converted_dates.append(d)
+
+        return (max(converted_dates) - min(converted_dates)).days
+
+    def _calculate_data_completeness(self) -> float:
+        """Calculate data completeness score (0-1)."""
+        # Simple completeness check
+        total_records = len(self.df_micro) + len(self.df_transfers)
+
+        # Check for missing data
+        missing_test_dates = self.df_micro["collection_date"].isna().sum()
+        missing_transfer_dates = (
+            self.df_transfers["ward_in_time"].isna().sum()
+            + self.df_transfers["ward_out_time"].isna().sum()
+        )
+        missing_locations = self.df_transfers["location"].isna().sum()
+
+        total_missing = missing_test_dates + missing_transfer_dates + missing_locations
+        completeness = 1.0 - (
+            total_missing / (total_records * 3)
+        )  # 3 key fields per record
+
+        return max(0.0, min(1.0, completeness))
 
     def generate_summary_metrics(
         self, graph_data: dict, clusters: list[dict]

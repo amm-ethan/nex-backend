@@ -12,10 +12,13 @@ from app.infrastructure.schemas.response_schemas.infection_detection_schemas imp
     AllInfectionsVisualizationResponse,
     InfectionDetectionRequest,
     InfectionDetectionResponse,
+    LocationRiskResponse,
     PatientDetailSchema,
     PatientListResponse,
     SpreadVisualizationResponse,
     SummaryMetricsSchema,
+    SuperSpreadersResponse,
+    TemporalPatternsResponse,
 )
 from app.infrastructure.services import infection_detection_service
 
@@ -82,13 +85,6 @@ async def detect_infection_clusters(
 
         return InfectionDetectionResponse(**results)
 
-    except FileNotFoundError as e:
-        logger.error(f"Data files not found: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Required data files (microbiology.csv, transfers.csv) not found in app/data/",
-        )
-
     except ValueError as e:
         logger.error(f"Data validation error: {str(e)}")
         raise HTTPException(
@@ -139,12 +135,6 @@ async def get_infection_summary() -> SummaryMetricsSchema:
 
         return SummaryMetricsSchema(**summary)
 
-    except FileNotFoundError:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Required data files not found in app/data/",
-        )
-
     except Exception as e:
         logger.error(f"Error generating summary: {str(e)}")
         raise HTTPException(
@@ -184,12 +174,6 @@ async def get_all_patients() -> PatientListResponse:
         logger.info(f"Retrieved data for {patient_data['total_patients']} patients")
 
         return PatientListResponse(**patient_data)
-
-    except FileNotFoundError:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Required data files not found in app/data/",
-        )
 
     except Exception as e:
         logger.error(f"Error fetching patient details: {str(e)}")
@@ -247,12 +231,6 @@ async def get_patient_by_id(patient_id: str) -> PatientDetailSchema:
     except HTTPException:
         raise  # Re-raise HTTP exceptions
 
-    except FileNotFoundError:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Required data files not found in app/data/",
-        )
-
     except Exception as e:
         logger.error(f"Error fetching patient {patient_id}: {str(e)}")
         raise HTTPException(
@@ -300,12 +278,6 @@ async def get_spread_visualization() -> AllInfectionsVisualizationResponse:
         )
 
         return AllInfectionsVisualizationResponse(**visualization_data)
-
-    except FileNotFoundError:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Required data files not found in app/data/",
-        )
 
     except Exception as e:
         logger.error(f"Error generating spread visualization: {str(e)}")
@@ -371,12 +343,6 @@ async def get_infection_spread_visualization(
     except HTTPException:
         raise  # Re-raise HTTP exceptions
 
-    except FileNotFoundError:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Required data files not found in app/data/",
-        )
-
     except Exception as e:
         logger.error(
             f"Error generating {infection_type} spread visualization: {str(e)}"
@@ -384,6 +350,135 @@ async def get_infection_spread_visualization(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error generating spread visualization for {infection_type}",
+        )
+
+
+@router.get(
+    "/super-spreaders",
+    response_model=SuperSpreadersResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Get super spreader detection analysis",
+    description="""
+    Identify patients who likely caused multiple transmissions:
+    
+    - Risk scores based on transmission count, locations, and confidence
+    - Transmission confidence averaging and infectious period analysis
+    - Perfect for targeted intervention strategies
+    - Identifies high-risk patients requiring special attention
+    """,
+)
+async def get_super_spreaders() -> SuperSpreadersResponse:
+    """
+    Get super spreader detection analysis.
+
+    Returns:
+        SuperSpreadersResponse: Super spreader analysis with risk scores and metadata
+
+    Raises:
+        HTTPException: If data files are missing or analysis fails
+    """
+    try:
+        logger.info("Generating super spreader analysis")
+
+        super_spreaders_data = infection_detection_service.get_super_spreaders()
+
+        logger.info(
+            f"Super spreaders analysis generated: {len(super_spreaders_data['super_spreaders'])} super spreaders identified"
+        )
+
+        return SuperSpreadersResponse(**super_spreaders_data)
+
+    except Exception as e:
+        logger.error(f"Error generating super spreaders analysis: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error generating super spreaders data",
+        )
+
+
+@router.get(
+    "/location-risk-heatmaps",
+    response_model=LocationRiskResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Get location risk heatmap analysis",
+    description="""
+    Generate location-based infection risk analysis:
+    
+    - Infection rates, transmission events, and risk levels by location
+    - Average stay duration and patient volume analysis
+    - Actionable recommendations for high-risk areas
+    - Risk categorization (LOW, MEDIUM, HIGH, CRITICAL)
+    """,
+)
+async def get_location_risk_heatmaps() -> LocationRiskResponse:
+    """
+    Get location risk heatmap analysis.
+
+    Returns:
+        LocationRiskResponse: Location risk analysis with recommendations and metadata
+
+    Raises:
+        HTTPException: If data files are missing or analysis fails
+    """
+    try:
+        logger.info("Generating location risk heatmap analysis")
+
+        location_risk_data = infection_detection_service.get_location_risk_heatmaps()
+
+        logger.info(
+            f"Location risk analysis generated: {len(location_risk_data['location_risks'])} locations analyzed"
+        )
+
+        return LocationRiskResponse(**location_risk_data)
+
+    except Exception as e:
+        logger.error(f"Error generating location risk analysis: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error generating location risk data",
+        )
+
+
+@router.get(
+    "/temporal-patterns",
+    response_model=TemporalPatternsResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Get temporal pattern analysis",
+    description="""
+    Analyze temporal patterns in infection transmission:
+    
+    - Peak transmission hours and high-risk days
+    - Incubation periods and transmission velocity
+    - Outbreak period identification with severity assessment
+    - Seasonal trends and transmission dynamics
+    """,
+)
+async def get_temporal_patterns() -> TemporalPatternsResponse:
+    """
+    Get temporal pattern analysis.
+
+    Returns:
+        TemporalPatternsResponse: Temporal pattern analysis with outbreak periods and metadata
+
+    Raises:
+        HTTPException: If data files are missing or analysis fails
+    """
+    try:
+        logger.info("Generating temporal pattern analysis")
+
+        temporal_patterns_data = infection_detection_service.get_temporal_patterns()
+
+        logger.info(
+            f"Temporal patterns analysis generated: {len(temporal_patterns_data['temporal_patterns'])} infection patterns"
+        )
+
+        return TemporalPatternsResponse(**temporal_patterns_data)
+
+    except Exception as e:
+        logger.error(f"Error generating temporal patterns analysis: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error generating temporal patterns data",
         )
 
 

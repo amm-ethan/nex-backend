@@ -21,7 +21,9 @@ dependencies = [
     "pandas>= 2.3.2",
     "numba>= 0.61.2",
     "numpy>=2.2.6",
-
+    # AI
+    "langchain_community>=0.3.29",
+    "langchain_openai>=0.3.32"
 ]
 
 [project.optional-dependencies]

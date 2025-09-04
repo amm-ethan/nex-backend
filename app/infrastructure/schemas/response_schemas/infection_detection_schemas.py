@@ -400,6 +400,30 @@ class TemporalPatternsResponse(BaseModel):
     analysis_metadata: dict[str, Any] = Field(..., description="Analysis metadata")
 
 
+class ClusterSummarySchema(BaseModel):
+    """Schema for LLM-generated cluster summary."""
+
+    cluster_id: int = Field(..., description="Cluster identifier")
+    clinical_summary: str = Field(..., description="Clinical summary (≤120 words)")
+    risk_level: str = Field(
+        ..., description="Risk level: LOW, MEDIUM, HIGH, CRITICAL, UNKNOWN"
+    )
+    key_insights: list[str] = Field(..., description="Key epidemiological insights")
+    recommendations: list[str] = Field(..., description="Clinical recommendations")
+    generated_by: str = Field(
+        ..., description="LLM source: ollama, openai, mock, or error"
+    )
+
+
+class ClusterSummariesResponse(BaseModel):
+    """Response schema for multiple cluster summaries."""
+
+    summaries: list[ClusterSummarySchema] = Field(..., description="Cluster summaries")
+    total_clusters: int = Field(..., description="Total number of clusters analyzed")
+    llm_status: dict[str, Any] = Field(..., description="LLM availability status")
+    analysis_metadata: dict[str, Any] = Field(..., description="Analysis metadata")
+
+
 class AdvancedAnalyticsResponse(BaseModel):
     """Response schema for combined advanced analytics data."""
 

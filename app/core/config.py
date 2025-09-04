@@ -20,6 +20,13 @@ class Settings(BaseSettings):
     API_V1_STR: str = "/api/v1"
     ROOT_PATH: str = ""  # For proxy prefixes
 
+    # OPEN AI API
+    OPENAI_API_KEY: str | None = None
+
+    # OLLAMA API
+    OLLAMA_URL: str = "http://localhost:11434"
+    OLLAMA_MODEL: str = "llama3.1:8b"  # deepseek-r1:7b
+
     # CORS Settings
     BACKEND_CORS_ORIGINS: list[str] = ["*"]
 

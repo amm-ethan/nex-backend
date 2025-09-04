@@ -10,6 +10,7 @@ from fastapi import APIRouter, HTTPException, status
 
 from app.infrastructure.schemas.response_schemas.infection_detection_schemas import (
     AllInfectionsVisualizationResponse,
+    ClusterSummariesResponse,
     InfectionDetectionRequest,
     InfectionDetectionResponse,
     LocationRiskResponse,
@@ -20,7 +21,10 @@ from app.infrastructure.schemas.response_schemas.infection_detection_schemas imp
     SuperSpreadersResponse,
     TemporalPatternsResponse,
 )
-from app.infrastructure.services import infection_detection_service
+from app.infrastructure.services import (
+    infection_detection_service,
+    llm_analyzer_service,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -436,6 +440,108 @@ async def get_location_risk_heatmaps() -> LocationRiskResponse:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Error generating location risk data",
+        )
+
+
+@router.get(
+    "/cluster-summaries",
+    response_model=ClusterSummariesResponse,
+    status_code=status.HTTP_200_OK,
+    summary="Get LLM-generated clinical summaries for infection clusters",
+    description="""
+    Generate clinical summaries for all infection clusters using LLM analysis:
+    
+    - Uses LangChain + Ollama (preferred) or OpenAI as fallback
+    - Plain-language summaries ≤120 words for clinicians
+    - Risk assessment and actionable recommendations
+    - Falls back to mock summaries if no LLM is available
+    - Includes epidemiological insights and intervention guidance
+    """,
+)
+async def get_cluster_summaries() -> ClusterSummariesResponse:
+    """
+    Generate clinical summaries for all infection clusters using LLM.
+
+    Returns:
+        ClusterSummariesResponse: Clinical summaries with risk assessment and recommendations
+
+    Raises:
+        HTTPException: If data files are missing or analysis fails
+    """
+    try:
+        logger.info("Generating LLM-based cluster summaries")
+
+        # First, ensure we have cluster data
+        if not infection_detection_service.contacts:
+            logger.info("No analysis found, running detection pipeline")
+            await infection_detection_service.run_detection_pipeline()
+
+        # Get cluster data
+        clusters_data = infection_detection_service.generate_cluster_data()
+
+        if not clusters_data:
+            logger.warning("No clusters available for summary generation")
+            return ClusterSummariesResponse(
+                summaries=[],
+                total_clusters=0,
+                llm_status={
+                    "ollama_available": llm_analyzer_service.ollama_available,
+                    "openai_available": llm_analyzer_service.openai_available,
+                },
+                analysis_metadata={
+                    "generated_at": datetime.now().isoformat(),
+                    "message": "No infection clusters detected",
+                },
+            )
+
+        # Generate summaries using LLM
+        summaries = await llm_analyzer_service.generate_multiple_cluster_summaries(
+            clusters_data
+        )
+
+        logger.info(f"Generated {len(summaries)} cluster summaries")
+
+        # Convert to response format
+        summary_schemas = []
+        for summary in summaries:
+            summary_schemas.append(
+                {
+                    "cluster_id": summary.cluster_id,
+                    "clinical_summary": summary.clinical_summary,
+                    "risk_level": summary.risk_level,
+                    "key_insights": summary.key_insights,
+                    "recommendations": summary.recommendations,
+                    "generated_by": summary.generated_by,
+                }
+            )
+
+        return ClusterSummariesResponse(
+            summaries=summary_schemas,
+            total_clusters=len(summaries),
+            llm_status={
+                "ollama_available": llm_analyzer_service.ollama_available,
+                "openai_available": llm_analyzer_service.openai_available,
+            },
+            analysis_metadata={
+                "generated_at": datetime.now().isoformat(),
+                "successful_generations": len(
+                    [s for s in summaries if s.generated_by != "error"]
+                ),
+                "llm_sources": list(set(s.generated_by for s in summaries)),
+            },
+        )
+
+    except FileNotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Required data files not found in app/data/",
+        )
+
+    except Exception as e:
+        logger.error(f"Error generating cluster summaries: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error generating cluster summaries",
         )
 
 

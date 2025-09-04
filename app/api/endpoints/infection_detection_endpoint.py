@@ -4,7 +4,6 @@ API endpoints for infection detection functionality.
 
 import logging
 from datetime import datetime
-from typing import Any
 
 from fastapi import APIRouter, HTTPException, status
 
@@ -17,7 +16,6 @@ from app.infrastructure.schemas.response_schemas.infection_detection_schemas imp
     PatientDetailSchema,
     PatientListResponse,
     SpreadVisualizationResponse,
-    SummaryMetricsSchema,
     SuperSpreadersResponse,
     TemporalPatternsResponse,
 )
@@ -103,48 +101,6 @@ async def detect_infection_clusters(
             detail="Internal server error during infection cluster detection",
         )
 
-
-@router.get(
-    "/summary",
-    response_model=SummaryMetricsSchema,
-    status_code=status.HTTP_200_OK,
-    summary="Get infection detection summary",
-    description="Get summary metrics from the last infection detection analysis.",
-)
-async def get_infection_summary() -> SummaryMetricsSchema:
-    """
-    Get summary metrics from infection detection.
-
-    Returns:
-        SummaryMetricsSchema: Summary statistics including patient counts, cluster counts, and distributions
-
-    Raises:
-        HTTPException: If no analysis has been run or data is unavailable
-    """
-    try:
-        # Check if we have analyzed data
-        if not infection_detection_service.contacts:
-            # Run a quick analysis with default parameters
-            logger.info(
-                "No previous analysis found, running detection with default parameters"
-            )
-            await infection_detection_service.run_detection_pipeline()
-
-        # Generate summary data
-        graph_data = infection_detection_service.generate_graph_data()
-        clusters = infection_detection_service.generate_cluster_data()
-        summary = infection_detection_service.generate_summary_metrics(
-            graph_data, clusters
-        )
-
-        return SummaryMetricsSchema(**summary)
-
-    except Exception as e:
-        logger.error(f"Error generating summary: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error generating summary metrics",
-        )
 
 
 @router.get(
@@ -358,7 +314,7 @@ async def get_infection_spread_visualization(
 
 
 @router.get(
-    "/super-spreaders",
+    "/analysis/super-spreaders",
     response_model=SuperSpreadersResponse,
     status_code=status.HTTP_200_OK,
     summary="Get super spreader detection analysis",
@@ -401,7 +357,7 @@ async def get_super_spreaders() -> SuperSpreadersResponse:
 
 
 @router.get(
-    "/location-risk-heatmaps",
+    "/analysis/location-risk",
     response_model=LocationRiskResponse,
     status_code=status.HTTP_200_OK,
     summary="Get location risk heatmap analysis",
@@ -444,7 +400,7 @@ async def get_location_risk_heatmaps() -> LocationRiskResponse:
 
 
 @router.get(
-    "/cluster-summaries",
+    "/llm",
     response_model=ClusterSummariesResponse,
     status_code=status.HTTP_200_OK,
     summary="Get LLM-generated clinical summaries for infection clusters",
@@ -546,7 +502,7 @@ async def get_cluster_summaries() -> ClusterSummariesResponse:
 
 
 @router.get(
-    "/temporal-patterns",
+    "/analysis/temporal-patterns",
     response_model=TemporalPatternsResponse,
     status_code=status.HTTP_200_OK,
     summary="Get temporal pattern analysis",
@@ -588,72 +544,3 @@ async def get_temporal_patterns() -> TemporalPatternsResponse:
         )
 
 
-@router.get(
-    "/data-status",
-    response_model=dict[str, Any],
-    status_code=status.HTTP_200_OK,
-    summary="Check data file status",
-    description="Check the availability and basic statistics of required data files.",
-)
-async def check_data_status() -> dict[str, Any]:
-    """
-    Check the status of data files required for infection detection.
-
-    Returns:
-        Dict containing data file status and basic statistics
-    """
-    try:
-        data_dir = infection_detection_service.data_dir
-
-        status_info = {"data_directory": str(data_dir), "files": {}}
-
-        # Check microbiology file
-        micro_file = infection_detection_service.microbiology_file
-        if micro_file.exists():
-            try:
-                import pandas as pd
-
-                df_micro = pd.read_csv(micro_file)
-                status_info["files"]["microbiology.csv"] = {
-                    "exists": True,
-                    "size_bytes": micro_file.stat().st_size,
-                    "row_count": len(df_micro),
-                    "columns": list(df_micro.columns),
-                }
-            except Exception as e:
-                status_info["files"]["microbiology.csv"] = {
-                    "exists": True,
-                    "error": f"Could not read file: {str(e)}",
-                }
-        else:
-            status_info["files"]["microbiology.csv"] = {"exists": False}
-
-        # Check transfers file
-        transfers_file = infection_detection_service.transfers_file
-        if transfers_file.exists():
-            try:
-                import pandas as pd
-
-                df_transfers = pd.read_csv(transfers_file)
-                status_info["files"]["transfers.csv"] = {
-                    "exists": True,
-                    "size_bytes": transfers_file.stat().st_size,
-                    "row_count": len(df_transfers),
-                    "columns": list(df_transfers.columns),
-                }
-            except Exception as e:
-                status_info["files"]["transfers.csv"] = {
-                    "exists": True,
-                    "error": f"Could not read file: {str(e)}",
-                }
-        else:
-            status_info["files"]["transfers.csv"] = {"exists": False}
-
-        return status_info
-
-    except Exception as e:
-        logger.error(f"Error checking data status: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error checking data status: {str(e)}",
-        )

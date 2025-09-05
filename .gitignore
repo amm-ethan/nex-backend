@@ -175,3 +175,4 @@ cython_debug/
 /storage/logs/*
 
 .serena
+CLAUDE.md

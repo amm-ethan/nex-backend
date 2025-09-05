@@ -136,17 +136,6 @@ class InfectionDetectionResponse(BaseModel):
     contacts: list[ContactEventSchema] = Field(..., description="All contact events")
 
 
-class InfectionDetectionRequest(BaseModel):
-    """Request schema for infection detection analysis."""
-
-    window_days: int = Field(
-        14, ge=1, le=365, description="Contact window in days (1-365)"
-    )
-    date_origin: str | None = Field(
-        None, description="Origin date for analysis (YYYY-MM-DD)"
-    )
-
-
 class ErrorResponse(BaseModel):
     """Schema for error responses."""
 
@@ -353,26 +342,6 @@ class LocationRiskSchema(BaseModel):
     recommended_actions: list[str] = Field(..., description="Suggested interventions")
 
 
-class TemporalPatternSchema(BaseModel):
-    """Schema for temporal pattern analysis."""
-
-    infection: str = Field(..., description="Infection type")
-    peak_transmission_hours: list[int] = Field(
-        ..., description="Hours with highest transmission (0-23)"
-    )
-    high_risk_days: list[str] = Field(
-        ..., description="Days of week with higher transmission"
-    )
-    seasonal_trend: str = Field(..., description="Seasonal pattern description")
-    avg_incubation_days: float | None = Field(
-        None, description="Average incubation period"
-    )
-    transmission_velocity: float = Field(..., description="Average cases per day")
-    outbreak_periods: list[dict[str, Any]] = Field(
-        ..., description="Identified outbreak periods"
-    )
-
-
 class SuperSpreadersResponse(BaseModel):
     """Response schema for super spreader detection."""
 
@@ -387,15 +356,6 @@ class LocationRiskResponse(BaseModel):
 
     location_risks: list[LocationRiskSchema] = Field(
         ..., description="Location risk heatmap data"
-    )
-    analysis_metadata: dict[str, Any] = Field(..., description="Analysis metadata")
-
-
-class TemporalPatternsResponse(BaseModel):
-    """Response schema for temporal pattern analysis."""
-
-    temporal_patterns: list[TemporalPatternSchema] = Field(
-        ..., description="Temporal pattern analysis"
     )
     analysis_metadata: dict[str, Any] = Field(..., description="Analysis metadata")
 
@@ -422,20 +382,3 @@ class ClusterSummariesResponse(BaseModel):
     total_clusters: int = Field(..., description="Total number of clusters analyzed")
     llm_status: dict[str, Any] = Field(..., description="LLM availability status")
     analysis_metadata: dict[str, Any] = Field(..., description="Analysis metadata")
-
-
-class AdvancedAnalyticsResponse(BaseModel):
-    """Response schema for combined advanced analytics data."""
-
-    super_spreaders: list[SuperSpreaderSchema] = Field(
-        ..., description="Super spreader analysis"
-    )
-    location_risks: list[LocationRiskSchema] = Field(
-        ..., description="Location risk heatmap data"
-    )
-    temporal_patterns: list[TemporalPatternSchema] = Field(
-        ..., description="Temporal pattern analysis"
-    )
-    analytics_metadata: dict[str, Any] = Field(
-        ..., description="Analysis metadata and statistics"
-    )

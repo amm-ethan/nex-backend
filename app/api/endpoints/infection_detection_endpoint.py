@@ -9,23 +9,23 @@ from datetime import datetime
 from fastapi import APIRouter, HTTPException, status
 from fastapi.responses import StreamingResponse
 
-from app.infrastructure.schemas.response_schemas.infection_detection_schemas import (
+from app.infrastructure.schemas.response_schemas.infection_detection_response_schemas import (
     AllInfectionsVisualizationResponse,
     ClusterSummariesResponse,
     ClusterSummarySchema,
-    InfectionDetectionRequest,
     InfectionDetectionResponse,
     LocationRiskResponse,
     PatientDetailSchema,
     PatientListResponse,
     SpreadVisualizationResponse,
     SuperSpreadersResponse,
-    TemporalPatternsResponse,
+    SummaryMetricsSchema,
 )
 from app.infrastructure.services import (
     infection_detection_service,
     llm_analyzer_service,
 )
+from infrastructure.schemas.request_schemas.infection_detection_request_schemas import InfectionDetectionRequest
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +48,7 @@ router = APIRouter()
     """,
 )
 async def detect_infection_clusters(
-    request: InfectionDetectionRequest,
+        request: InfectionDetectionRequest,
 ) -> InfectionDetectionResponse:
     """
     Detect infection clusters from hospital data.
@@ -102,6 +102,49 @@ async def detect_infection_clusters(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Internal server error during infection cluster detection",
+        )
+
+
+@router.get(
+    "/summary",
+    response_model=SummaryMetricsSchema,
+    status_code=status.HTTP_200_OK,
+    summary="Get infection detection summary",
+    description="Get summary metrics from the last infection detection analysis.",
+)
+async def get_infection_summary() -> SummaryMetricsSchema:
+    """
+    Get summary metrics from infection detection.
+
+    Returns:
+        SummaryMetricsSchema: Summary statistics including patient counts, cluster counts, and distributions
+
+    Raises:
+        HTTPException: If no analysis has been run or data is unavailable
+    """
+    try:
+        # Check if we have analyzed data
+        if not infection_detection_service.contacts:
+            # Run a quick analysis with default parameters
+            logger.info(
+                "No previous analysis found, running detection with default parameters"
+            )
+            await infection_detection_service.run_detection_pipeline()
+
+        # Generate summary data
+        graph_data = infection_detection_service.generate_graph_data()
+        clusters = infection_detection_service.generate_cluster_data()
+        summary = infection_detection_service.generate_summary_metrics(
+            graph_data, clusters
+        )
+
+        return SummaryMetricsSchema(**summary)
+
+    except Exception as e:
+        logger.error(f"Error generating summary: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Error generating summary metrics",
         )
 
 
@@ -268,7 +311,7 @@ async def get_spread_visualization() -> AllInfectionsVisualizationResponse:
     """,
 )
 async def get_infection_spread_visualization(
-    infection_type: str,
+        infection_type: str,
 ) -> SpreadVisualizationResponse:
     """
     Get spread visualization data for a specific infection type.
@@ -694,47 +737,4 @@ async def get_specific_cluster_summary_json(cluster_id: int) -> ClusterSummarySc
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Error generating summary for cluster {cluster_id}",
-        )
-
-
-@router.get(
-    "/analysis/temporal-patterns",
-    response_model=TemporalPatternsResponse,
-    status_code=status.HTTP_200_OK,
-    summary="Get temporal pattern analysis",
-    description="""
-    Analyze temporal patterns in infection transmission:
-    
-    - Peak transmission hours and high-risk days
-    - Incubation periods and transmission velocity
-    - Outbreak period identification with severity assessment
-    - Seasonal trends and transmission dynamics
-    """,
-)
-async def get_temporal_patterns() -> TemporalPatternsResponse:
-    """
-    Get temporal pattern analysis.
-
-    Returns:
-        TemporalPatternsResponse: Temporal pattern analysis with outbreak periods and metadata
-
-    Raises:
-        HTTPException: If data files are missing or analysis fails
-    """
-    try:
-        logger.info("Generating temporal pattern analysis")
-
-        temporal_patterns_data = infection_detection_service.get_temporal_patterns()
-
-        logger.info(
-            f"Temporal patterns analysis generated: {len(temporal_patterns_data['temporal_patterns'])} infection patterns"
-        )
-
-        return TemporalPatternsResponse(**temporal_patterns_data)
-
-    except Exception as e:
-        logger.error(f"Error generating temporal patterns analysis: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Error generating temporal patterns data",
         )

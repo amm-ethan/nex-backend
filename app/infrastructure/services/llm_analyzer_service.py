@@ -8,7 +8,7 @@ from typing import Any
 
 import requests
 from langchain_core.messages import HumanMessage
-from langchain_ollama import OllamaLLM
+from langchain_ollama import ChatOllama
 from langchain_openai import ChatOpenAI
 from pydantic import BaseModel
 
@@ -65,7 +65,7 @@ class LLMAnalyzerService:
         contacts = cluster_data.get("contacts", [])
 
         prompt = f"""
-You are a hospital infection control specialist analyzing an infection cluster. 
+You are a hospital infection control specialist analyzing an infection cluster.
 Provide a concise clinical summary in exactly 120 words or fewer for healthcare professionals.
 
 CLUSTER DATA:
@@ -120,14 +120,15 @@ REQUIREMENTS:
         """Generate summary using Ollama."""
         try:
             # Use a medical-focused model if available, otherwise fall back to llama2
-            llm = OllamaLLM(
+            llm = ChatOllama(
                 model=settings.OLLAMA_MODEL,
-                base_url=settings.OLLAMA_URL,
+                base_url=settings.OLLAMA_URL,  # e.g. "http://localhost:11434"
+                temperature=0.1,  # clinical tone, consistent
             )
 
             response = await llm.ainvoke(prompt)
             logger.info("Generated summary using Ollama")
-            return response.strip()
+            return response.content.strip()
 
         except Exception as e:
             logger.error(f"Ollama generation failed: {e}")
@@ -167,12 +168,12 @@ REQUIREMENTS:
             location_text += f" and {len(locations) - 3} other locations"
 
         summary = f"""
-        Cluster {cluster_id} involves {patient_count} patients with {infection_text} infections 
-        across {location_text}. Timeline spans from {date_range.get("earliest", "unknown")} 
-        to {date_range.get("latest", "unknown")}. Epidemiological investigation suggests 
-        potential healthcare-associated transmission. Recommend enhanced infection control 
-        measures including contact precautions, environmental cleaning, and staff education. 
-        Monitor for additional cases and consider molecular typing for outbreak confirmation. 
+        Cluster {cluster_id} involves {patient_count} patients with {infection_text} infections
+        across {location_text}. Timeline spans from {date_range.get("earliest", "unknown")}
+        to {date_range.get("latest", "unknown")}. Epidemiological investigation suggests
+        potential healthcare-associated transmission. Recommend enhanced infection control
+        measures including contact precautions, environmental cleaning, and staff education.
+        Monitor for additional cases and consider molecular typing for outbreak confirmation.
         Review antibiotic stewardship and isolation protocols in affected areas.
         """.strip()
 
@@ -185,10 +186,88 @@ REQUIREMENTS:
 
         return summary
 
-    def _extract_insights_and_recommendations(
-        self, summary: str, cluster_data: dict[str, Any]
+    def _get_insights_prompt(self, cluster_data: dict[str, Any]) -> str:
+        """Generate prompt for extracting insights and recommendations."""
+        patients = cluster_data.get("patients", [])
+        infections = cluster_data.get("infections", [])
+        locations = cluster_data.get("locations", [])
+        date_range = cluster_data.get("date_range", {})
+        contacts = cluster_data.get("contacts", [])
+
+        prompt = f"""
+You are a hospital infection control specialist analyzing an infection cluster.
+Based on the cluster data below, provide exactly 3 key clinical insights and exactly 4 actionable recommendations.
+
+CLUSTER DATA:
+- Cluster ID: {cluster_data.get("cluster_id")}
+- Patients affected: {len(patients)}
+- Infection types: {", ".join(infections)}
+- Locations involved: {", ".join(locations)}
+- Date range: {date_range.get("earliest")} to {date_range.get("latest")}
+- Total contact events: {len(contacts)}
+
+PATIENT DETAILS:
+{self._format_patient_details(patients)}
+
+CONTACT EVENTS:
+{self._format_contact_events(contacts)}
+
+RESPONSE FORMAT (return exactly this structure):
+INSIGHTS:
+1. [First key insight about epidemiological significance]
+2. [Second key insight about transmission patterns or risk factors]
+3. [Third key insight about clinical implications]
+
+RECOMMENDATIONS:
+1. [First actionable recommendation for infection control]
+2. [Second actionable recommendation for prevention]
+3. [Third actionable recommendation for monitoring/surveillance]
+4. [Fourth actionable recommendation for clinical management]
+
+Keep each insight and recommendation to one concise sentence. Focus on clinical relevance and actionability.
+"""
+        return prompt.strip()
+
+    def _parse_insights_response(self, response: str) -> tuple[list[str], list[str]]:
+        """Parse LLM response to extract insights and recommendations."""
+        insights = []
+        recommendations = []
+
+        lines = response.strip().split("\n")
+        current_section = None
+
+        for line in lines:
+            line = line.strip()
+            if not line:
+                continue
+
+            if line.upper().startswith("INSIGHTS:"):
+                current_section = "insights"
+                continue
+            elif line.upper().startswith("RECOMMENDATIONS:"):
+                current_section = "recommendations"
+                continue
+
+            # Extract numbered items
+            if line.startswith(("1.", "2.", "3.", "4.")):
+                content = line[2:].strip()
+                if current_section == "insights" and len(insights) < 3:
+                    insights.append(content)
+                elif current_section == "recommendations" and len(recommendations) < 4:
+                    recommendations.append(content)
+
+        # Ensure we have the right number of items, pad with fallbacks if needed
+        while len(insights) < 3:
+            insights.append("Clinical review recommended")
+        while len(recommendations) < 4:
+            recommendations.append("Follow standard infection control protocols")
+
+        return insights[:3], recommendations[:4]
+
+    def _generate_fallback_insights(
+        self, cluster_data: dict[str, Any]
     ) -> tuple[list[str], list[str]]:
-        """Extract key insights and recommendations from cluster data."""
+        """Generate insights and recommendations using rule-based logic as fallback."""
         insights = []
         recommendations = []
 
@@ -220,7 +299,35 @@ REQUIREMENTS:
         if "ICU" in locations or "MICU" in locations:
             recommendations.append("Prioritize critical care infection prevention")
 
-        return insights[:3], recommendations[:4]  # Limit to keep response concise
+        return insights[:3], recommendations[:4]
+
+    async def _extract_insights_and_recommendations(
+        self, summary: str, cluster_data: dict[str, Any]
+    ) -> tuple[list[str], list[str]]:
+        """Extract key insights and recommendations from cluster data using LLM."""
+        # Try to get insights and recommendations from LLM first
+        if self.ollama_available or self.openai_available:
+            try:
+                insights_prompt = self._get_insights_prompt(cluster_data)
+
+                if self.ollama_available:
+                    try:
+                        llm_response = await self._generate_with_ollama(insights_prompt)
+                        return self._parse_insights_response(llm_response)
+                    except Exception as e:
+                        logger.warning(f"Ollama failed for insights generation: {e}")
+
+                if self.openai_available:
+                    try:
+                        llm_response = await self._generate_with_openai(insights_prompt)
+                        return self._parse_insights_response(llm_response)
+                    except Exception as e:
+                        logger.warning(f"OpenAI failed for insights generation: {e}")
+            except Exception as e:
+                logger.error(f"LLM insights generation failed: {e}")
+
+        # Fallback to rule-based logic if LLM fails
+        return self._generate_fallback_insights(cluster_data)
 
     def _determine_risk_level(self, cluster_data: dict[str, Any]) -> str:
         """Determine risk level based on cluster characteristics."""
@@ -296,7 +403,7 @@ REQUIREMENTS:
             logger.info("Using mock summary - no LLM available")
 
         # Extract additional insights and recommendations
-        insights, recommendations = self._extract_insights_and_recommendations(
+        insights, recommendations = await self._extract_insights_and_recommendations(
             summary_text, cluster_data
         )
         risk_level = self._determine_risk_level(cluster_data)

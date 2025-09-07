@@ -7,8 +7,8 @@ import logging
 from typing import Any
 
 import requests
-from langchain_community.llms import Ollama
 from langchain_core.messages import HumanMessage
+from langchain_ollama import OllamaLLM
 from langchain_openai import ChatOpenAI
 from pydantic import BaseModel
 
@@ -80,7 +80,7 @@ PATIENT DETAILS:
 {self._format_patient_details(patients)}
 
 CONTACT EVENTS:
-{self._format_contact_events(contacts[:5])}  # Show first 5 contacts
+{self._format_contact_events(contacts)}
 
 REQUIREMENTS:
 - Write in clinical, professional tone
@@ -95,17 +95,13 @@ REQUIREMENTS:
     def _format_patient_details(self, patients: list[dict]) -> str:
         """Format patient details for prompt."""
         details = []
-        for patient in patients[:8]:  # Limit to first 8 patients
+        for patient in patients:
             patient_id = patient.get("patient_id", "Unknown")
             infections = patient.get("infections", [])
             test_dates = patient.get("test_dates", [])
             details.append(
                 f"- {patient_id}: {', '.join(infections)} (tests: {', '.join(test_dates)})"
             )
-
-        if len(patients) > 8:
-            details.append(f"- ... and {len(patients) - 8} more patients")
-
         return "\n".join(details)
 
     def _format_contact_events(self, contacts: list[dict]) -> str:
@@ -124,7 +120,7 @@ REQUIREMENTS:
         """Generate summary using Ollama."""
         try:
             # Use a medical-focused model if available, otherwise fall back to llama2
-            llm = Ollama(
+            llm = OllamaLLM(
                 model=settings.OLLAMA_MODEL,
                 base_url=settings.OLLAMA_URL,
             )
@@ -165,7 +161,7 @@ REQUIREMENTS:
         date_range = cluster_data.get("date_range", {})
 
         infection_text = ", ".join(infections) if infections else "multiple organisms"
-        location_text = ", ".join(locations[:3]) if locations else "various locations"
+        location_text = ", ".join(locations) if locations else "various locations"
 
         if len(locations) > 3:
             location_text += f" and {len(locations) - 3} other locations"

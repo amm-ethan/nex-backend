@@ -241,10 +241,10 @@ Keep each insight and recommendation to one concise sentence. Focus on clinical 
             if not line:
                 continue
 
-            if line.upper().startswith("INSIGHTS:"):
+            if line.upper().startswith("INSIGHTS:") or line.upper().startswith("**INSIGHTS:**"):
                 current_section = "insights"
                 continue
-            elif line.upper().startswith("RECOMMENDATIONS:"):
+            elif line.upper().startswith("RECOMMENDATIONS:") or line.upper().startswith("**RECOMMENDATIONS:**"):
                 current_section = "recommendations"
                 continue
 
@@ -255,14 +255,7 @@ Keep each insight and recommendation to one concise sentence. Focus on clinical 
                     insights.append(content)
                 elif current_section == "recommendations" and len(recommendations) < 4:
                     recommendations.append(content)
-
-        # Ensure we have the right number of items, pad with fallbacks if needed
-        while len(insights) < 3:
-            insights.append("Clinical review recommended")
-        while len(recommendations) < 4:
-            recommendations.append("Follow standard infection control protocols")
-
-        return insights[:3], recommendations[:4]
+        return insights, recommendations
 
     def _generate_fallback_insights(
         self, cluster_data: dict[str, Any]
@@ -302,7 +295,7 @@ Keep each insight and recommendation to one concise sentence. Focus on clinical 
         return insights[:3], recommendations[:4]
 
     async def _extract_insights_and_recommendations(
-        self, summary: str, cluster_data: dict[str, Any]
+        self, cluster_data: dict[str, Any]
     ) -> tuple[list[str], list[str]]:
         """Extract key insights and recommendations from cluster data using LLM."""
         # Try to get insights and recommendations from LLM first
@@ -386,7 +379,7 @@ Keep each insight and recommendation to one concise sentence. Focus on clinical 
         if self.ollama_available:
             try:
                 summary_text = await self._generate_with_ollama(prompt)
-                generated_by = "ollama"
+                generated_by = f"ollama ({settings.OLLAMA_MODEL})"
             except Exception as e:
                 logger.warning(f"Ollama failed, trying OpenAI: {e}")
 
@@ -404,7 +397,7 @@ Keep each insight and recommendation to one concise sentence. Focus on clinical 
 
         # Extract additional insights and recommendations
         insights, recommendations = await self._extract_insights_and_recommendations(
-            summary_text, cluster_data
+            cluster_data
         )
         risk_level = self._determine_risk_level(cluster_data)
 

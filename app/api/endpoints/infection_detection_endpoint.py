@@ -25,7 +25,7 @@ from app.infrastructure.services import (
     infection_detection_service,
     llm_analyzer_service,
 )
-from infrastructure.schemas.request_schemas.infection_detection_request_schemas import InfectionDetectionRequest
+from app.infrastructure.schemas.request_schemas.infection_detection_request_schemas import InfectionDetectionRequest
 
 logger = logging.getLogger(__name__)
 
